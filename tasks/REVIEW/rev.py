@@ -6,14 +6,16 @@ if not mt5.initialize():
     print("Initialization failed:", mt5.last_error())
     quit()
 
-symbol = "EURUSD"
+symbol = "USDCHF"
 
 mt5.symbol_select(symbol, True)
 
-rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 0, 20)
+data = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 0, 20)
 
-ohcl = pd.DataFrame(rates)
+df = pd.DataFrame(data)
 
-ohcl.to_csv('data.csv')
+df.to_csv("OHCL.csv")
+
+print(df)
 
 mt5.shutdown()
