@@ -28,7 +28,6 @@ class Program
             await websocket.SendAsync(new ArraySegment<byte>(buffer), WebSocketMessageType.Text, true, CancellationToken.None);
             Console.WriteLine("Request sent to WebSocket.");
 
-            // دریافت داده‌ها از WebSocket
             var receiveBuffer = new byte[1024];
             while (true)
             {
