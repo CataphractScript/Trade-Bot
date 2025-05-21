@@ -1,13 +1,15 @@
-﻿using Newtonsoft.Json;
+﻿using CsvHelper;
+using CsvHelper.Configuration;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Drawing;
 using System.Globalization;
+using System.IO;
 using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using System.IO;
 
 namespace Visualize
 {
@@ -15,9 +17,8 @@ namespace Visualize
     {
         private static readonly Uri ServerUri = new Uri("wss://www.lbkex.net/ws/V2/");
         private static KbarData? lastKbar = null;
-        //private static DateTime currentMinute = DateTime.MinValue;
 
-        private static List<KbarData> kbarBuffer = new List<KbarData>();
+        //private static List<KbarData> kbarBuffer = new List<KbarData>();
         private static DateTime currentMinute = DateTime.MinValue;
 
         private static readonly string CsvFilePath = "candles.csv";
@@ -102,50 +103,50 @@ namespace Visualize
                                     var kbar = deserializeMessage.kbar;
                                     DateTime kbarTime = new DateTime(kbar.t.Year, kbar.t.Month, kbar.t.Day, kbar.t.Hour, kbar.t.Minute, 0);
 
-                                    //// If a new minute starts, save the previous candle
-                                    //if (kbarTime > currentMinute)
-                                    //{
-                                    //    if (lastKbar != null)
-                                    //    {
-                                    //        Logger.Log($"[CANDLE] Time: {currentMinute:HH:mm}, O: {lastKbar.o}, H: {lastKbar.h}, L: {lastKbar.l}, C: {lastKbar.c}", Color.Yellow);
-                                    //        SaveCandleToCsv(currentMinute, lastKbar.o, lastKbar.h, lastKbar.l, lastKbar.c);
-                                    //    }
-                                    //    currentMinute = kbarTime;
-                                    //}
-
-                                    //// Update latest kbar for the current minute
-                                    //lastKbar = kbar;
-
-
-                                    // Initialize currentMinute if it hasn't been set yet
-                                    if (currentMinute == DateTime.MinValue)
-                                        currentMinute = new DateTime(kbarTime.Year, kbarTime.Month, kbarTime.Day, kbarTime.Hour, kbarTime.Minute, 0);
-
-                                    // If the data is still within the same minute, add it to the buffer
-                                    if (kbarTime >= currentMinute && kbarTime < currentMinute.AddMinutes(1))
+                                    // If a new minute starts, save the previous candle
+                                    if (kbarTime > currentMinute)
                                     {
-                                        kbarBuffer.Add(kbar);
-                                    }
-                                    else
-                                    {
-                                        // Minute has changed, so create and log the candle
-                                        if (kbarBuffer.Count > 0)
+                                        if (lastKbar != null)
                                         {
-                                            var open = kbarBuffer.First().o;
-                                            var close = kbarBuffer.Last().c;
-                                            var high = kbarBuffer.Max(k => k.h);
-                                            var low = kbarBuffer.Min(k => k.l);
-
-                                            Logger.Log($"[CANDLE] Time: {currentMinute:HH:mm}, O: {open}, H: {high}, L: {low}, C: {close}", Color.Yellow);
-
-                                            SaveCandleToCsv(currentMinute, open, high, low, close);
+                                            Logger.Log($"[CANDLE] Date: {currentMinute:HH:mm}, O: {lastKbar.o}, H: {lastKbar.h}, L: {lastKbar.l}, C: {lastKbar.c}", Color.Yellow);
+                                            SaveCandleToCsv(currentMinute, lastKbar.o, lastKbar.h, lastKbar.l, lastKbar.c);
                                         }
-
-                                        // Clear the buffer for the new minute
-                                        kbarBuffer.Clear();
-                                        currentMinute = new DateTime(kbarTime.Year, kbarTime.Month, kbarTime.Day, kbarTime.Hour, kbarTime.Minute, 0);
-                                        kbarBuffer.Add(kbar);
+                                        currentMinute = kbarTime;
                                     }
+
+                                    // Update latest kbar for the current minute
+                                    lastKbar = kbar;
+
+
+                                    //// Initialize currentMinute if it hasn't been set yet
+                                    //if (currentMinute == DateTime.MinValue)
+                                    //    currentMinute = new DateTime(kbarTime.Year, kbarTime.Month, kbarTime.Day, kbarTime.Hour, kbarTime.Minute, 0);
+
+                                    //// If the data is still within the same minute, add it to the buffer
+                                    //if (kbarTime >= currentMinute && kbarTime < currentMinute.AddMinutes(1))
+                                    //{
+                                    //    kbarBuffer.Add(kbar);
+                                    //}
+                                    //else
+                                    //{
+                                    //    // Minute has changed, so create and log the candle
+                                    //    if (kbarBuffer.Count > 0)
+                                    //    {
+                                    //        var open = kbarBuffer.First().o;
+                                    //        var close = kbarBuffer.Last().c;
+                                    //        var high = kbarBuffer.Max(k => k.h);
+                                    //        var low = kbarBuffer.Min(k => k.l);
+
+                                    //        Logger.Log($"[CANDLE] Time: {currentMinute:HH:mm}, O: {open}, H: {high}, L: {low}, C: {close}", Color.Yellow);
+
+                                    //        SaveCandleToCsv(currentMinute, open, high, low, close);
+                                    //    }
+
+                                    //    // Clear the buffer for the new minute
+                                    //    kbarBuffer.Clear();
+                                    //    currentMinute = new DateTime(kbarTime.Year, kbarTime.Month, kbarTime.Day, kbarTime.Hour, kbarTime.Minute, 0);
+                                    //    kbarBuffer.Add(kbar);
+                                    //}
                                 }
                                 else
                                 {
@@ -170,20 +171,61 @@ namespace Visualize
         }
 
         // Save candle to CSV file safely using file lock
+        //private static void SaveCandleToCsv(DateTime time, double open, double high, double low, double close)
+        //{
+        //    lock (FileLock)
+        //    {
+        //        bool fileExists = File.Exists(CsvFilePath);
+
+        //        using (var writer = new StreamWriter(CsvFilePath, append: true))
+        //        {
+        //            if (!fileExists)
+        //            {
+        //                writer.WriteLine("Time,Open,High,Low,Close");
+        //            }
+
+        //            writer.WriteLine($"{time:yyyy-MM-dd HH:mm},{open},{high},{low},{close}");
+        //        }
+        //    }
+        //}
+
         private static void SaveCandleToCsv(DateTime time, double open, double high, double low, double close)
         {
-            lock (FileLock)
+            lock (FileLock) // Ensure thread safety when writing to the file
             {
-                bool fileExists = File.Exists(CsvFilePath);
+                bool fileExists = File.Exists(CsvFilePath); // Check if the CSV file already exists
 
-                using (var writer = new StreamWriter(CsvFilePath, append: true))
+                // Configure CsvHelper settings; write header only if file does not exist
+                var config = new CsvConfiguration(CultureInfo.InvariantCulture)
                 {
+                    HasHeaderRecord = !fileExists
+                };
+
+                // Open file in append mode if it exists, otherwise create a new file
+                using (var stream = File.Open(CsvFilePath, fileExists ? FileMode.Append : FileMode.Create))
+                using (var writer = new StreamWriter(stream))
+                using (var csv = new CsvWriter(writer, config))
+                {
+                    // Write header if the file is new
                     if (!fileExists)
                     {
-                        writer.WriteLine("Time,Open,High,Low,Close");
+                        csv.WriteHeader<CandleModel>();
+                        csv.NextRecord();
                     }
 
-                    writer.WriteLine($"{time:yyyy-MM-dd HH:mm},{open},{high},{low},{close}");
+                    // Create a new Candle object with the provided data
+                    var candle = new CandleModel
+                    {
+                        Date = time,
+                        Open = open,
+                        High = high,
+                        Low = low,
+                        Close = close
+                    };
+
+                    // Write the candle record and move to the next line
+                    csv.WriteRecord(candle);
+                    csv.NextRecord();
                 }
             }
         }
