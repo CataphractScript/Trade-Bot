@@ -32,7 +32,7 @@ namespace Visualize
             {
                 new Axis
                 {
-                    Labeler = value => new DateTime((long)value).ToLocalTime().ToString("HH:mm"),
+                    Labeler = value => new DateTime((long)value).ToString("HH:mm"),
                     UnitWidth = TimeSpan.FromMinutes(1).Ticks,
                     LabelsRotation = 15,
                     TextSize = 12,
@@ -146,13 +146,31 @@ namespace Visualize
                 Chart.Series = new ISeries[] { newSeries };
                 Chart.XAxes = CreateDefaultXAxis();
                 Chart.YAxes = CreateDefaultYAxis();
+
+                return;
             }
             else
             {
-                // If the series already exists and Values is an ObservableCollection, just add the new candle
-                if (newSeries.Values is ObservableCollection<FinancialPoint> observableValues)
+                // Ensure we are working with an ObservableCollection
+                if (newSeries.Values is not ObservableCollection<FinancialPoint> candleCollection)
                 {
-                    observableValues.Add(newCandle);
+                    // If not, convert existing data to ObservableCollection
+                    var newCollection = new ObservableCollection<FinancialPoint>(
+                        newSeries.Values?.Cast<FinancialPoint>() ?? Enumerable.Empty<FinancialPoint>()
+                    );
+                    newSeries.Values = newCollection;
+                    candleCollection = newCollection;
+                }
+
+                // Insert the candle in its correct time position (sorted)
+                int insertIndex = candleCollection.ToList().FindIndex(c => c.Date > time);
+                if (insertIndex == -1)
+                {
+                    candleCollection.Add(newCandle); // Insert at end
+                }
+                else
+                {
+                    candleCollection.Insert(insertIndex, newCandle); // Insert at correct time position
                 }
             }
 
