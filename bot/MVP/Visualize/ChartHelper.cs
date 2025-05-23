@@ -25,10 +25,60 @@ namespace Visualize
         public static ObservableCollection<FinancialPoint> Candles => _candles;
         private const int MaxCandles = 10000;
 
+        // Setup X axis (time axis)
+        private static Axis[] CreateDefaultXAxis()
+        {
+            return new[]
+            {
+                new Axis
+                {
+                    Labeler = value => new DateTime((long)value).ToLocalTime().ToString("HH:mm"),
+                    UnitWidth = TimeSpan.FromMinutes(1).Ticks,
+                    LabelsRotation = 15,
+                    TextSize = 12,
+                }
+            };
+        }
+
+        // Setup Y axis (price axis)
+        private static Axis[] CreateDefaultYAxis()
+        {
+            return new[]
+            {
+                new Axis
+                {
+                    Labeler = value => value.ToString("F2"),
+                    TextSize = 12
+                }
+            };
+        }
+
+        private static CandlesticksSeries<FinancialPoint> CreateCandleSeries(ObservableCollection<FinancialPoint> values)
+        {
+            return new CandlesticksSeries<FinancialPoint>
+            {
+                Values = values
+            };
+        }
+
+
         public static void InitializeChart(CartesianChart chart)
         {
+            string csvPath = "candles.csv";
+
+            try
+            {
+                if (!File.Exists(csvPath)) throw new FileNotFoundException();
+            }
+            catch (Exception ex)
+            {
+                Logger.Log(ex.Message, Color.Red);
+                return;
+            }
+
             // Load data from CSV file
-            LoadCandlesFromCsv("candles.csv");
+            LoadCandlesFromCsv(csvPath);
+
 
             // Convert CandleModel to FinancialPointI
             var chartData = _candles.Select(c => new FinancialPoint
@@ -47,32 +97,13 @@ namespace Visualize
             };
 
             chart.Series = new ISeries[] { series };
-
-            // Setup X axis labels (date labels)
-            chart.XAxes = new[]
-            {
-                new Axis
-                {
-                    Labeler = value => new DateTime((long)value).ToLocalTime().ToString("HH:mm"),
-                    UnitWidth = TimeSpan.FromMinutes(1).Ticks,
-                    LabelsRotation = 15,
-                    TextSize = 12,
-                }
-            };
-
-            chart.YAxes = new[]
-            {
-                new Axis
-                {
-                    Labeler = value => value.ToString("F2"),
-                    TextSize = 12
-                }
-            };
+            chart.XAxes = CreateDefaultXAxis();
+            chart.YAxes = CreateDefaultYAxis();
         }
 
         public static void LoadCandlesFromCsv(string csvPath)
         {
-            if (!File.Exists(csvPath)) throw new FileNotFoundException($"CSV File not found at this path: {csvPath}");
+            if (!File.Exists(csvPath)) throw new FileNotFoundException();
 
             var reader = new StreamReader(csvPath);
             var csv = new CsvReader(reader, CultureInfo.InvariantCulture);
@@ -92,8 +123,41 @@ namespace Visualize
                 _candles.Add(candle);
             }
         }
+
+        public static void AddCandle(CartesianChart Chart, DateTime time, double open, double high, double low, double close)
+        {
+            // Create a new candle (financial data point)
+            var newCandle = new FinancialPoint(time, high, open, close, low);
+
+            // Try to find an existing CandlesticksSeries in the chart
+            var newSeries = Chart.Series?.OfType<CandlesticksSeries<FinancialPoint>>().FirstOrDefault();
+
+            if (newSeries == null)
+            {
+                // If no series exists, create a new ObservableCollection and add the first candle
+                var candleList = new ObservableCollection<FinancialPoint> { newCandle };
+
+                // Create a new candlestick series with the initial candle list
+                newSeries = new CandlesticksSeries<FinancialPoint>
+                {
+                    Values = candleList
+                };
+
+                Chart.Series = new ISeries[] { newSeries };
+                Chart.XAxes = CreateDefaultXAxis();
+                Chart.YAxes = CreateDefaultYAxis();
+            }
+            else
+            {
+                // If the series already exists and Values is an ObservableCollection, just add the new candle
+                if (newSeries.Values is ObservableCollection<FinancialPoint> observableValues)
+                {
+                    observableValues.Add(newCandle);
+                }
+            }
+
+            // Optional: force chart to update (may not be necessary)
+            Chart.Update();
+        }
     }
 }
-
-
-
