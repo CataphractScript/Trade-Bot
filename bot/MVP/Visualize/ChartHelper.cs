@@ -3,16 +3,20 @@ using LiveChartsCore;
 using LiveChartsCore.Defaults;
 using LiveChartsCore.Measure;
 using LiveChartsCore.SkiaSharpView;
+using LiveChartsCore.SkiaSharpView.Painting;
 using LiveChartsCore.SkiaSharpView.WinForms;
+using Skender.Stock.Indicators;
 using SkiaSharp;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection.Metadata;
-using Visualize;
+using static SkiaSharp.HarfBuzz.SKShaper;
+
 
 namespace Visualize
 {
@@ -24,6 +28,7 @@ namespace Visualize
         private static ObservableCollection<FinancialPoint> _candles = new();
         public static ObservableCollection<FinancialPoint> Candles => _candles;
         private const int MaxCandles = 10000;
+        private const int ThresholdPercent = 1;
 
         // Setup X axis (time axis)
         private static Axis[] CreateDefaultXAxis()
@@ -53,13 +58,13 @@ namespace Visualize
             };
         }
 
-        private static CandlesticksSeries<FinancialPoint> CreateCandleSeries(ObservableCollection<FinancialPoint> values)
-        {
-            return new CandlesticksSeries<FinancialPoint>
-            {
-                Values = values
-            };
-        }
+        //private static CandlesticksSeries<FinancialPoint> CreateCandleSeries(ObservableCollection<FinancialPoint> values)
+        //{
+        //    return new CandlesticksSeries<FinancialPoint>
+        //    {
+        //        Values = values
+        //    };
+        //}
 
 
         public static void InitializeChart(CartesianChart chart)
@@ -93,12 +98,58 @@ namespace Visualize
             // Setup chart series
             var series = new CandlesticksSeries<FinancialPoint>
             {
-                Values = chartData
+                Values = chartData,
+                UpFill = new SolidColorPaint(new SKColor(0, 204, 0)),
+                UpStroke = null,
+                DownFill = new SolidColorPaint(new SKColor(0, 0, 0)),
+                DownStroke = null,
             };
 
-            chart.Series = new ISeries[] { series };
+            chart.Series = new LiveChartsCore.ISeries[] { series };
             chart.XAxes = CreateDefaultXAxis();
             chart.YAxes = CreateDefaultYAxis();
+
+            // Add ZigZag indicator series
+            //AddZigZagSeries(chart);
+        }
+
+        // Add ZigZag indicator as a line series to the chart
+        public static void AddZigZagSeries(CartesianChart chart)
+        {
+            // Convert to list of Quote for indicator calculation
+            var quotes = _candles.Select(c => new Quote
+            {
+                Date = c.Date,
+                Open = (decimal)c.Open,
+                High = (decimal)c.High,
+                Low = (decimal)c.Low,
+                Close = (decimal)c.Close,
+                Volume = 0
+            }).ToList();
+
+            // Calculate ZigZag indicator with (ThresholdPercent)% threshold using Close prices
+            var zigzag = quotes.GetZigZag(endType: EndType.HighLow, percentChange: ThresholdPercent);
+
+            // Extract non-null ZigZag points
+            var zigzagPoints = zigzag
+                .Where(p => p.ZigZag != null)
+                .Select(p => new ObservablePoint(p.Date.Ticks, (double)p.ZigZag!))
+                .ToList();
+
+            // Create line series for ZigZag indicator
+            var zigzagSeries = new LineSeries<ObservablePoint>
+            {
+                Values = zigzagPoints,
+                Stroke = new SolidColorPaint(new SKColor(255, 0, 255)),
+                Fill = null,
+                GeometrySize = 0,
+                LineSmoothness = 0
+            };
+
+            // Append ZigZag series to existing chart series
+            var currentSeries = chart.Series?.ToList() ?? new List<LiveChartsCore.ISeries>();
+            currentSeries.Add(zigzagSeries);
+            chart.Series = currentSeries.ToArray();
         }
 
         public static void LoadCandlesFromCsv(string csvPath)
@@ -123,7 +174,6 @@ namespace Visualize
                 _candles.Add(candle);
             }
         }
-
         public static void AddCandle(CartesianChart Chart, DateTime time, double open, double high, double low, double close)
         {
             // Create a new candle (financial data point)
@@ -143,7 +193,7 @@ namespace Visualize
                     Values = candleList
                 };
 
-                Chart.Series = new ISeries[] { newSeries };
+                Chart.Series = new LiveChartsCore.ISeries[] { newSeries };
                 Chart.XAxes = CreateDefaultXAxis();
                 Chart.YAxes = CreateDefaultYAxis();
 
