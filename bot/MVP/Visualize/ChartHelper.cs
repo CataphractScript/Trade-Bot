@@ -113,10 +113,10 @@ namespace Visualize
             //AddZigZagSeries(chart);
         }
 
-        // Add ZigZag indicator as a line series to the chart
+        // Add ZigZag indicator as a line series to the chart with Fibonacci levels at the end
         public static void AddZigZagSeries(CartesianChart chart)
         {
-            // Convert to list of Quote for indicator calculation
+            // Convert candles to list of Quote for indicator calculation
             var quotes = _candles.Select(c => new Quote
             {
                 Date = c.Date,
@@ -127,10 +127,10 @@ namespace Visualize
                 Volume = 0
             }).ToList();
 
-            // Calculate ZigZag indicator with (ThresholdPercent)% threshold using Close prices
+            // Calculate ZigZag indicator with (ThresholdPercent)% threshold using HighLow prices
             var zigzag = quotes.GetZigZag(endType: EndType.HighLow, percentChange: ThresholdPercent);
 
-            // Extract non-null ZigZag points
+            // Extract non-null ZigZag points as ObservablePoints
             var zigzagPoints = zigzag
                 .Where(p => p.ZigZag != null)
                 .Select(p => new ObservablePoint(p.Date.Ticks, (double)p.ZigZag!))
@@ -146,10 +146,134 @@ namespace Visualize
                 LineSmoothness = 0
             };
 
-            // Append ZigZag series to existing chart series
+            // Get existing series or create new list
             var currentSeries = chart.Series?.ToList() ?? new List<LiveChartsCore.ISeries>();
             currentSeries.Add(zigzagSeries);
+
+            // Identify turning points (Highs and Lows) from zigzag points
+            var turningPoints = new List<(long ticks, double Price, string Type)>();
+
+            for (int i = 1; i < zigzagPoints.Count - 1; i++)
+            {
+                var prev = zigzagPoints[i - 1];
+                var current = zigzagPoints[i];
+                var next = zigzagPoints[i + 1];
+
+                string type = "";
+                if (current.Y > prev.Y && current.Y > next.Y)
+                    type = "High";
+                else if (current.Y < prev.Y && current.Y < next.Y)
+                    type = "Low";
+
+                if (type != "")
+                    turningPoints.Add(((long)current.X, current.Y.Value, type));
+            }
+
+            // Separate High and Low points for plotting
+            var highPoints = turningPoints
+                .Where(p => p.Type == "High")
+                .Select(p => new ObservablePoint(p.ticks, p.Price))
+                .ToList();
+
+            var lowPoints = turningPoints
+                .Where(p => p.Type == "Low")
+                .Select(p => new ObservablePoint(p.ticks, p.Price))
+                .ToList();
+
+            // Create scatter series for High points (blue)
+            var highSeries = new ScatterSeries<ObservablePoint>
+            {
+                Values = highPoints,
+                GeometrySize = 8,
+                Fill = new SolidColorPaint(SKColors.Blue),
+            };
+
+            // Create scatter series for Low points (orange)
+            var lowSeries = new ScatterSeries<ObservablePoint>
+            {
+                Values = lowPoints,
+                GeometrySize = 8,
+                Fill = new SolidColorPaint(SKColors.Orange)
+            };
+
+            currentSeries.Add(highSeries);
+            currentSeries.Add(lowSeries);
+
+            // Take the last High and Low points for Fibonacci levels calculation
+            if (highPoints.Count == 0 || lowPoints.Count == 0)
+            {
+                chart.Series = currentSeries.ToArray();
+                return; // Not enough points to draw Fibonacci
+            }
+
+            var high = highPoints.Last();
+            var low = lowPoints.Last();
+
+            var fibonacciLevels = GetFibonacciLevels(high.Y.Value, low.Y.Value);
+
+            // Define start and end X axis range for Fibonacci lines
+            var startDate = low.X < high.X ? low.X : high.X;
+            var endDate = _candles.Last().Date.Ticks;
+
+            // Add Fibonacci retracement lines and labels
+            foreach (var level in fibonacciLevels)
+            {
+                // Create a Fibonacci line series for each level
+                var fibSeries = new LineSeries<ObservablePoint>
+                {
+                    Values = new List<ObservablePoint>
+                    {
+                        new ObservablePoint(startDate, level.Level),
+                        new ObservablePoint(endDate, level.Level)
+                    },
+                    Stroke = new SolidColorPaint(SKColors.Gray, 1),
+                    Fill = null,
+                    GeometrySize = 0,
+                    LineSmoothness = 0,
+                    Name = level.Label,
+                };
+
+                currentSeries.Add(fibSeries);
+
+                // Create a label for the Fibonacci level (invisible geometry but with data label)
+                var label = new ScatterSeries<ObservablePoint>
+                {
+                    Values = new List<ObservablePoint>
+                    {
+                        new ObservablePoint((high.X + low.X) / 2, level.Level)
+                    },
+                    GeometrySize = 0,
+                    Fill = new SolidColorPaint(SKColors.Transparent),
+                    Name = level.Label,
+                    DataLabelsPaint = new SolidColorPaint(SKColors.Black),
+                    DataLabelsSize = 15,
+                    DataLabelsFormatter = point => $"{level.Label}: {point.Model.Y:F2}",
+                    Stroke = new SolidColorPaint(SKColors.Transparent)
+                };
+                currentSeries.Add(label);
+            }
+
+            // Update chart series
             chart.Series = currentSeries.ToArray();
+        }
+
+        /// <summary>
+        /// Calculate common Fibonacci retracement levels between high and low prices.
+        /// </summary>
+        /// <param name=\"high\">High price point</param>
+        /// <param name=\"low\">Low price point</param>
+        /// <returns>List of tuples with Level value and Label</returns>
+        private static List<(double Level, string Label)> GetFibonacciLevels(double high, double low)
+        {
+            var range = high - low;
+
+            return
+            [
+                (high - range * 0.382, "Fib 38.2%"),
+                (high - range * 0.5, "Fib 50%"),
+                (high - range * 0.618, "Fib 61.8%"),
+                (high - range * 0.78, "Fib 78%")
+            ];
         }
 
         public static void LoadCandlesFromCsv(string csvPath)
