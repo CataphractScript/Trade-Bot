@@ -1,22 +1,16 @@
 ﻿using CsvHelper;
-using CsvHelper.Configuration;
 using LiveChartsCore.SkiaSharpView.WinForms;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using System;
-using System.Drawing;
 using System.Globalization;
-using System.IO;
 using System.Net.WebSockets;
 using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace Visualize
 {
     internal static class API
     {
-        private static KbarData? lastKbar = null;
+        private static WsKbarData? lastKbar = null;
 
         //private static List<KbarData> kbarBuffer = new List<KbarData>();
         private static DateTime currentMinute = DateTime.MinValue;
@@ -25,80 +19,77 @@ namespace Visualize
 
         public static async Task RestApiAsync(string symbol = "btc_usdt", string timeFrame = "minute1", int size = 100)
         {
-            Uri HttpUrl = new Uri("https://api.lbkex.com/v2/kline.do");
-
-            // Calculate the Unix timestamp for the start time of requested candles
-            long timeStamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - (60 * size);
-
-            // Prepare the query parameters for the API request
-            var parameters = new Dictionary<string, string>()
+            try
             {
-                { "symbol", symbol },
-                { "size", size.ToString() },
-                { "type", timeFrame },
-                { "time", timeStamp.ToString() }
-            };
+                Uri HttpUrl = new Uri("https://api.lbkex.com/v2/kline.do");
+                //string url = "https://api.lbkex.com/v2/kline.do";
 
-            //using var client = new HttpClient();
-            using (HttpClient client = new HttpClient())
+                // Calculate the starting time based on the number of candles and interval
+                long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds() - (60 * size);
+
+                // Prepare query parameters
+                var parameters = new Dictionary<string, string>
+                {
+                    { "symbol", symbol },
+                    { "size", size.ToString() },
+                    { "type", timeFrame },
+                    { "time", timestamp.ToString() }
+                };
+
+                // Build the full URL with query string
+                var uriBuilder = new UriBuilder(HttpUrl);
+                var query = new FormUrlEncodedContent(parameters);
+                uriBuilder.Query = await query.ReadAsStringAsync();
+
+
+                using HttpClient httpClient = new HttpClient();
+                // Send HTTP GET request to the API
+                HttpResponseMessage response = await httpClient.GetAsync(uriBuilder.ToString());
+                response.EnsureSuccessStatusCode(); // Throw exception if the response is not successful
+
+                // Read and parse the response body
+                string content = await response.Content.ReadAsStringAsync();
+                var json = JObject.Parse(content);
+
+                Logger.Log("\nFull response from server: " + json);
+
+                // Check for API-level error
+                if (json["result"]?.ToString() != "true")
+                {
+                    Logger.Log("❌ API Error: " + json["msg"]?.ToString());
+                    return;
+                }
+
+                // Parse the data array from JSON
+                var data = json["data"] as JArray;
+                var candles = new List<HttpData>();
+
+                // Convert each item into a CandleData object
+                foreach (var item in data)
+                {
+                    candles.Add(new HttpData
+                    {
+                        Timestamp = DateTimeOffset.FromUnixTimeSeconds(item[0].Value<long>()).UtcDateTime.AddHours(8),
+                        Open = item[1].Value<double>(),
+                        High = item[2].Value<double>(),
+                        Low = item[3].Value<double>(),
+                        Close = item[4].Value<double>(),
+                        Volume = item[5].Value<double>()
+                    });
+                }
+
+                // Write the candles to a CSV file
+                foreach (var candle in candles)
+                {
+                    SaveCandleToCsv(candle.Timestamp, candle.Open, candle.High, candle.Low, candle.Close);
+                }
+
+                Logger.Log("✅ Candlestick data saved to: " + CsvFilePath);
+            }
+            catch (HttpRequestException e)
             {
-
-                try
-                {
-                    // Build the full request URI with query parameters
-                    var uriBuilder = new UriBuilder(HttpUrl);
-                    var query = System.Web.HttpUtility.ParseQueryString(uriBuilder.Query);
-                    foreach (var param in parameters)
-                        query[param.Key] = param.Value;
-                    uriBuilder.Query = query.ToString();
-
-                    // Send GET request to the API
-                    var response = await client.GetAsync(uriBuilder.Uri);
-                    response.EnsureSuccessStatusCode(); // Throw if HTTP response is unsuccessful
-
-                    // Read the response content as a JSON string
-                    string json = await response.Content.ReadAsStringAsync();
-
-                    // Deserialize JSON response to LBankApiResponse object
-                    var apiResponse = JsonConvert.DeserializeObject<HttpApiResponse>(json);
-
-                    Console.WriteLine("\nFull response from server: " + json);
-
-                    // Check if API response indicates success
-                    if (apiResponse.Result != "true")
-                    {
-                        Logger.Log("❌ API Error: " + apiResponse);
-                        return;
-                    }
-
-                    // Loop through each candle data and save it to CSV
-                    foreach (var item in apiResponse.Data)
-                    {
-                        // Convert Unix timestamp (seconds) to DateTime
-                        var unixTimestamp = Convert.ToInt64(item[0]);
-                        DateTime rawTime = DateTimeOffset.FromUnixTimeSeconds(unixTimestamp).UtcDateTime;
-                        DateTime dateTime = new DateTime(rawTime.Year, rawTime.Month, rawTime.Day, rawTime.Hour, rawTime.Minute, 0, DateTimeKind.Utc);
-
-                        // Parse candle prices as double
-                        double Open = Convert.ToDouble(item[1]);
-                        double High = Convert.ToDouble(item[2]);
-                        double Low = Convert.ToDouble(item[3]);
-                        double Close = Convert.ToDouble(item[4]);
-
-                        // Save candle data to CSV file
-                        SaveCandleToCsv(dateTime, Open, High, Low, Close);
-                    }
-
-                    Logger.Log("Data saved to CSV successfully.");
-                }
-                catch (HttpRequestException e)
-                {
-                    Logger.Log($"Request error: {e.Message}");
-                }
-                catch (Exception e)
-                {
-                    Logger.Log($"Unexpected error: {e.Message}");
-                }
+                // Handle connection errors
+                Logger.Log($"Connection error: {e.Message}");
             }
         }
 
@@ -203,7 +194,7 @@ namespace Visualize
                             try
                             {
                                 // Deserialize the JSON message into ApiResponse object
-                                var deserializeMessage = JsonConvert.DeserializeObject<ApiResponse>(message);
+                                var deserializeMessage = JsonConvert.DeserializeObject<WsApiResponse>(message);
 
                                 // Check if the message contains valid candlestick data
                                 if (deserializeMessage != null &&
@@ -299,8 +290,7 @@ namespace Visualize
         }
 
 
-
-        //Save candle to CSV file safely using file lock
+        //    Save candle to CSV file safely using file lock
         //private static void SaveCandleToCsv(DateTime time, double open, double high, double low, double close)
         //{
         //    lock (FileLock)
@@ -309,57 +299,104 @@ namespace Visualize
 
         //        using (var writer = new StreamWriter(CsvFilePath, append: true))
         //        {
-        //            if (!fileExists)
-        //            {
-        //                writer.WriteLine("Time,Open,High,Low,Close");
-        //            }
+        //            //if (!fileExists)
+        //            //{
+        //            //    writer.WriteLine("Time,Open,High,Low,Close");
+        //            //}
 
         //            writer.WriteLine($"{time:yyyy-MM-dd HH:mm},{open},{high},{low},{close}");
         //        }
         //    }
         //}
 
+
+        //private static void SaveCandleToCsv(DateTime time, double open, double high, double low, double close)
+        //{
+        //    lock (FileLock)
+        //    {
+        //        bool fileExists = File.Exists(CsvFilePath);
+        //        bool hasHeader = false;
+
+        //        // Check if file exists and contains a valid header
+        //        if (fileExists)
+        //        {
+        //            using (var reader = new StreamReader(CsvFilePath))
+        //            {
+        //                var firstLine = reader.ReadLine();
+        //                hasHeader = !string.IsNullOrWhiteSpace(firstLine) &&
+        //                            firstLine.Contains("Time") &&
+        //                            firstLine.Contains("Open") &&
+        //                            firstLine.Contains("High") &&
+        //                            firstLine.Contains("Low") &&
+        //                            firstLine.Contains("Close");
+        //            }
+        //        }
+
+        //        // Write header if file doesn't exist or header is missing
+        //        if (!fileExists || !hasHeader)
+        //        {
+        //            using (var headerWriter = new StreamWriter(CsvFilePath, append: false))
+        //            {
+        //                headerWriter.WriteLine("Time,Open,High,Low,Close");
+        //                headerWriter.Flush();
+        //            }
+        //        }
+
+        //        // Append the new candle record to the file
+        //        using (var writer = new StreamWriter(CsvFilePath, append: true))
+        //        {
+        //            writer.WriteLine($"{time:yyyy-MM-dd HH:mm},{open},{high},{low},{close}");
+        //            writer.Flush();
+        //        }
+        //    }
+        //}
+
         private static void SaveCandleToCsv(DateTime time, double open, double high, double low, double close)
         {
-            lock (FileLock) // Ensure thread safety when writing to the file
+            lock (FileLock)
             {
                 bool fileExists = File.Exists(CsvFilePath);
+                bool hasContent = false;
                 bool hasHeader = false;
 
+                // Check if file exists and whether it has content and header
                 if (fileExists)
                 {
-                    // Read the first line to check if header exists
                     using (var reader = new StreamReader(CsvFilePath))
                     {
                         var firstLine = reader.ReadLine();
-                        hasHeader = firstLine != null &&
-                                    firstLine.Contains("Date") &&
-                                    firstLine.Contains("Open") &&
-                                    firstLine.Contains("High") &&
-                                    firstLine.Contains("Low") &&
-                                    firstLine.Contains("Close");
+                        hasContent = !string.IsNullOrWhiteSpace(firstLine);
+
+                        if (hasContent)
+                        {
+                            hasHeader = firstLine.Contains("Date") &&
+                                        firstLine.Contains("Open") &&
+                                        firstLine.Contains("High") &&
+                                        firstLine.Contains("Low") &&
+                                        firstLine.Contains("Close");
+                        }
                     }
                 }
 
-                // Configure CsvHelper settings
-                var config = new CsvConfiguration(CultureInfo.InvariantCulture)
+                // Write header if file doesn't exist or is empty or has no header
+                if (!fileExists || !hasContent || !hasHeader)
                 {
-                    HasHeaderRecord = !fileExists || !hasHeader
-                };
-
-                // Open file in append mode if it exists, otherwise create a new file
-                using (var stream = File.Open(CsvFilePath, fileExists ? FileMode.Append : FileMode.Create))
-                using (var writer = new StreamWriter(stream))
-                using (var csv = new CsvWriter(writer, config))
-                {
-                    // Write header if the file is new or header is missing
-                    if (!fileExists || !hasHeader)
+                    // Open file, write header, and close immediately
+                    using (var stream = new FileStream(CsvFilePath, FileMode.Append, FileAccess.Write, FileShare.Read))
+                    using (var writer = new StreamWriter(stream))
+                    using (var csv = new CsvWriter(writer, CultureInfo.InvariantCulture))
                     {
                         csv.WriteHeader<CandleModel>();
                         csv.NextRecord();
+                        writer.Flush();
                     }
+                }
 
-                    // Create and write the candle data
+                // Write candle record (append mode)
+                using (var stream = new FileStream(CsvFilePath, FileMode.Append, FileAccess.Write, FileShare.Read))
+                using (var writer = new StreamWriter(stream))
+                using (var csv = new CsvWriter(writer, CultureInfo.InvariantCulture))
+                {
                     var candle = new CandleModel
                     {
                         Date = time,
@@ -371,8 +408,10 @@ namespace Visualize
 
                     csv.WriteRecord(candle);
                     csv.NextRecord();
+                    writer.Flush();
                 }
             }
         }
+
     }
 } // namespace end
