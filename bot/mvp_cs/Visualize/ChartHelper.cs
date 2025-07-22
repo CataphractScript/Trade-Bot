@@ -1,21 +1,12 @@
 ﻿using CsvHelper;
-using LiveChartsCore;
 using LiveChartsCore.Defaults;
-using LiveChartsCore.Measure;
 using LiveChartsCore.SkiaSharpView;
 using LiveChartsCore.SkiaSharpView.Painting;
 using LiveChartsCore.SkiaSharpView.WinForms;
 using Skender.Stock.Indicators;
 using SkiaSharp;
-using System;
-using System.Collections;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
-using System.IO;
-using System.Linq;
-using System.Reflection.Metadata;
-using static SkiaSharp.HarfBuzz.SKShaper;
 
 
 namespace Visualize
@@ -41,6 +32,8 @@ namespace Visualize
                     UnitWidth = TimeSpan.FromMinutes(1).Ticks,
                     LabelsRotation = 15,
                     TextSize = 12,
+                    MinLimit = null,
+                    MaxLimit = null
                 }
             };
         }
@@ -314,7 +307,11 @@ namespace Visualize
                 // Create a new candlestick series with the initial candle list
                 newSeries = new CandlesticksSeries<FinancialPoint>
                 {
-                    Values = candleList
+                    Values = candleList,
+                    UpFill = new SolidColorPaint(new SKColor(0, 204, 0)),
+                    UpStroke = null,
+                    DownFill = new SolidColorPaint(new SKColor(0, 0, 0)),
+                    DownStroke = null,
                 };
 
                 Chart.Series = new LiveChartsCore.ISeries[] { newSeries };
